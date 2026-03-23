@@ -1,5 +1,10 @@
-#install.packages("sRDA")
+library(Matrix)
+library(RSpectra)
 library(sRDA)
+library(PMA)
+library(Ball)
+library(truncnorm)
+
 
 # from the same folder
 setwd("folder path") ### your folder path that function2.R is saved
@@ -14,8 +19,9 @@ ny <- 1500   # |Y| = total number of Y variables (columns in Y)
 
 # Two planted subgraphs with within- and cross- block correlations cor0[i]
 cor0 <- c(0.3, 0.3)
-x_num_sub <- c(10, 15)  # sizes of subgraphs along X
-y_num_sub <- c(15, 20)  # sizes of subgraphs along Y
+add_cor = -0.3
+x_num_sub <- c(20,30)  # sizes of subgraphs along X
+y_num_sub <- c(30,40)  # sizes of subgraphs along Y
 
 nx_sub <- sum(x_num_sub)          # total 'signal' X features
 ny_sub <- sum(y_num_sub)          # total 'signal' Y features
@@ -28,6 +34,7 @@ cormat <- matrix(0, n, n)         # full correlation matrix placeholder (not dir
 Sigma_x  <- matrix(0, nx, nx)     # within-X correlation (to fill with block structure)
 Sigma_y  <- matrix(0, ny, ny)     # within-Y correlation
 Sigma_xy <- matrix(0, nx, ny)     # cross-correlation X-Y
+
 
 ## Fill X blocks with cor0[i]
 initial <- 1
@@ -53,16 +60,19 @@ for (i in 1:length(y_num_sub)) {
 }
 
 ## Randomly “punch holes” (zero-out) inside each planted block to increase heterogeneity
-xi <- c(0, cumsum(x_num_sub))
-yi <- c(0, cumsum(y_num_sub))
-for (i in 1:length(x_num_sub)) {
-  xindex <- (xi[i] + 1):xi[i + 1]
-  yindex <- (yi[i] + 1):yi[i + 1]
-  x1 <- sample(xindex, size = floor(x_num_sub[i] / 5))
-  y1 <- sample(yindex, size = floor(y_num_sub[i] / 5))
-  Sigma_x[x1, x1] <- 0
-  Sigma_y[y1, y1] <- 0
-  Sigma_xy[x1, y1] <- 0
+
+xi = c(0,cumsum(x_num_sub))
+yi = c(0,cumsum(y_num_sub))
+
+for(i in 1:length(x_num_sub)){
+  xindex = (xi[i]+1):xi[i+1]
+  yindex = (yi[i]+1):yi[i+1]
+  x1 = sample(xindex,size=floor(x_num_sub[i]/5))
+  y1 = sample(yindex,size=floor(y_num_sub[i]/5))
+  Sigma_x[x1,x1] = Sigma_x[x1,x1]-add_cor
+  Sigma_y[y1,y1] = Sigma_y[y1,y1]-add_cor
+  Sigma_xy[x1,y1] = Sigma_xy[x1,y1] +add_cor
+  
 }
 
 diag(Sigma_x) <- 1
@@ -76,6 +86,9 @@ Sigma_xy00 <- Sigma_xy[1:nx_sub, 1:ny_sub]
 Sigma1 <- rbind(cbind(Sigma_x, Sigma_xy), cbind(t(Sigma_xy), Sigma_y))
 Sigma  <- rbind(cbind(Sigma_x00, Sigma_xy00), cbind(t(Sigma_xy00), Sigma_y00))
 
+#Sigma_y00[1:15,1:15]
+#Sigma_y00[16:35,16:35]
+
 ## Storage across replicates
 results  <- list()  # stores final Phase-2 picks & metadata
 results2 <- list()  # Phase-1 screened set with size 2d
@@ -84,6 +97,9 @@ results4 <- list()  # Phase-1 screened set with size 4d
 ## ---------------------------
 ## simulation loop
 ## ---------------------------
+
+#library(matrixcalc)
+#is.positive.semi.definite(Sigma_y00)
 
 num_episods = 10
 
@@ -95,8 +111,8 @@ for (k in 1:num_episods) {
   ## Draw Gaussian samples for the signal block only; append Gaussian noise features
   ## (Signal block correlates as Sigma; noise features are independent N(0,1))
   results1 <- mvtnorm::rmvnorm(n = sample_n, sigma = Sigma)
-  X <- cbind(results1[, 1:nx_sub], matrix(rnorm(sample_n * x_uncor), sample_n, x_uncor))
-  Y <- cbind(results1[, (nx_sub + 1):(nx_sub + ny_sub)], matrix(rnorm(sample_n * y_uncor), sample_n, y_uncor))
+  X = cbind(results1[,1:nx_sub],matrix(rnorm(sample_n*x_uncor),sample_n, x_uncor))
+  Y = cbind(results1[,(nx_sub+1):(nx_sub+ny_sub)],matrix(rnorm(sample_n*y_uncor),sample_n, y_uncor))
   
   ## Empirical absolute cross-correlation
   W00 <- abs(cor(X, Y))
@@ -121,9 +137,9 @@ for (k in 1:num_episods) {
   
   ## -------- Phase 1 (subg22_s1): greedy screening using epsilon1 and (rsum, csum) --------
   ## screening size  = 4d
-  results4[[k]] <- subg22_s1(X, Y, rsum, csum, cut = cut1, ps1 = 4 * d, qs1 = 4 * d, k1 = 10, k2 = 10) 
+  results4[[k]] <- gids_p1(X, Y, rsum, csum, cut = cut1, ps1 = 4 * d, qs1 = 4 * d, k1 = 13, k2 = 17, verbose=TRUE) 
   ## screening size  = 2d
-  results2[[k]] <- subg22_s1(X, Y, rsum, csum, cut = cut1, ps1 = 2 * d, qs1 = 2 * d, k1 = 10, k2 = 10)
+  results2[[k]] <- gids_p1(X, Y, rsum, csum, cut = cut1, ps1 = 2 * d, qs1 = 2 * d, k1 = 10, k2 = 10)
   
   ## -------- Phase 2 (subg22_1): greedy peeling (lambda-density) + subg22_2 refinement --------
   lambda <- seq(0.5, 0.9, by = 0.1)          # grid of lambda exponents for density score
@@ -131,7 +147,7 @@ for (k in 1:num_episods) {
   W_phase2 <- abs(cor(X[, results2[[k]]$x], Y[, results2[[k]]$y]))
   gamma0   <- sum(W_phase2 > cut2) / length(W_phase2)
   
-  result2 <- subg22_1(
+  result2 <- gids_p2(
     W1     = W_phase2,
     lambda = lambda,
     cut1   = cut1,

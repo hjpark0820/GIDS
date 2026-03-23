@@ -1,4 +1,3 @@
-
 ## EM_GMM_counts
 ## -------------------------------------------------------------------------
 ## Purpose
@@ -315,8 +314,135 @@ kld_cross00 = function(W,index){
   KLdiv/normalizer
 }
 
+## Purpose
+##   Score a collection of extracted subgraphs by a normalized KL divergence
+##   between edge rates inside vs. outside the union of subgraphs, using
+##   a binary adjacency W built at epsilon2. Returns KLdiv / (entropy normalizer).
+##
+## Inputs
+##   W     : 0/1 adjacency matrix derived from |cor| at epsilon2 (same dimensions as W1).
+##   index : list of subgraphs; each element has $x (rows), $y (cols).
+##
+## Output
+##   numeric scalar: normalized KL (nKL). Returns -Inf if no valid subgraph.
+##
+## Details
+##   - p  = overall edge rate; p1 = edge rate inside union of subgraphs;
+##     p0 = edge rate outside.
+##   - Normalizer = sum of binary entropies weighted by sizes inside/outside,
+##     to keep nKL dimensionless and comparable across selections.
+##   - Edge cases handled: empty subgraphs, p1 = 1, or degenerate coverage.
+kld_cross002 = function(W,index,table_total,grid=seq(0,1,by=0.02),threshold){
+  
+  
+  #threshold=0.2
+  #table_total=hist2
+  table1 = table(cut(W, breaks = grid, right = FALSE))
+  
+  total_size = sum(table_total)
+  table0 = table_total-table1
+  
+  ## Set the number of extracted subgraphs
+  n = length(index)
+  
+  # Calculate the normalized KL-divergence (nKL-div)
+  if(length(index[[1]]$x)==0||length(index[[1]]$y)==0) {
+    KLdiv = -Inf # if no subgraph is extracted, nKL-div = -infinite
+    normalizer = 1 # normalizer: entropy
+  } else {
+    
+    p =  sum(table_total[grid[-1]>=threshold])/total_size  # p: overall mean of edge connections in the entire graph
+    sum1= c() # vector for the numbers of edges in subgraphs
+    size = c() # vector for the sizes of subgraphs
+    for(i in 1:n){
+      sum1[i] = sum(W[index[[i]]$x,index[[i]]$y]) 
+      size[i] = length(index[[i]]$x)*length(index[[i]]$y)
+    }
+    
+    p1 = sum(sum1)/sum(size) # p1: the average of edge connection in the entire extracted subgraphs
+    W = as.matrix(W)
+    p0 = sum(table0[grid[-1]>=threshold])/sum(table0) # p0: the average of edge connection outside the extracted subgraphs
+    
+    # normalizer (entropy) calculation
+    if (p1 < 1){
+      normalizer = - sum(size)*(p1*log(p1) + (1-p1)*log(1-p1)) - (length(W)-sum(size))*(p0*log(p0) + (1-p0)*log(1-p0)) 
+    } else {
+      normalizer = - (length(W)-sum(size))*(p0*log(p0) + (1-p0)*log(1-p0))
+    }
+    
+    # KL-divergence calculation
+    KLdiv = 0
+    
+    if (length(index[[1]]$x)==0 || length(index[[1]]$y)==0) {
+      KLdiv = - Inf
+    } else  if (p1 == 1){
+      KLdiv = sum(size)*(p1*log(p1/p) ) + (length(W)-sum(size))*(p0*log(p0/p) +  (1-p0)*log((1-p0)/(1-p))) 
+    } else if (length(index$x)+length(index$y) < dim(W)[1]+dim(W)[2] ){
+      KLdiv =  sum(size)*(p1*log(p1/p) +  (1-p1)*log((1-p1)/(1-p))) + (length(W)-sum(size))*(p0*log(p0/p) +  (1-p0)*log((1-p0)/(1-p))) 
+    } else {
+      KLdiv = -Inf
+    }
+    
+  }
+  
+  # Return normalized KL-divergence
+  KLdiv
+}
 
-## subg22_s1  — GIDS Phase 1 (screening)
+
+
+
+kld_cross001 = function(W,index){
+  
+  ## Set the number of extracted subgraphs
+  n = length(index)
+  
+  # Calculate the normalized KL-divergence (nKL-div)
+  if(length(index[[1]]$x)==0||length(index[[1]]$y)==0) {
+    KLdiv = -Inf # if no subgraph is extracted, nKL-div = -infinite
+    normalizer = 1 # normalizer: entropy
+  } else {
+    
+    p = mean(W) # p: overall mean of edge connections in the entire graph
+    sum1= c() # vector for the numbers of edges in subgraphs
+    size = c() # vector for the sizes of subgraphs
+    for(i in 1:n){
+      sum1[i] = sum(W[index[[i]]$x,index[[i]]$y]) 
+      size[i] = length(index[[i]]$x)*length(index[[i]]$y)
+    }
+    
+    p1 = sum(sum1)/sum(size) # p1: the average of edge connection in the entire extracted subgraphs
+    W = as.matrix(W)
+    p0 = (sum(W) - sum(sum1) ) / (dim(W)[1]*dim(W)[2] - sum(size) ) # p0: the average of edge connection outside the extracted subgraphs
+    
+    # normalizer (entropy) calculation
+    if (p1 < 1){
+      normalizer = - sum(size)*(p1*log(p1) + (1-p1)*log(1-p1)) - (length(W)-sum(size))*(p0*log(p0) + (1-p0)*log(1-p0)) 
+    } else {
+      normalizer = - (length(W)-sum(size))*(p0*log(p0) + (1-p0)*log(1-p0))
+    }
+    
+    # KL-divergence calculation
+    KLdiv = 0
+    
+    if (length(index[[1]]$x)==0 || length(index[[1]]$y)==0) {
+      KLdiv = - Inf
+    } else  if (p1 == 1){
+      KLdiv = sum(size)*(p1*log(p1/p) ) + (length(W)-sum(size))*(p0*log(p0/p) +  (1-p0)*log((1-p0)/(1-p))) 
+    } else if (length(index$x)+length(index$y) < dim(W)[1]+dim(W)[2] ){
+      KLdiv =  sum(size)*(p1*log(p1/p) +  (1-p1)*log((1-p1)/(1-p))) + (length(W)-sum(size))*(p0*log(p0/p) +  (1-p0)*log((1-p0)/(1-p))) 
+    } else {
+      KLdiv = -Inf
+    }
+    
+  }
+  
+  # Return normalized KL-divergence
+  KLdiv
+}
+
+
+## gids_p1  — GIDS Phase 1 (screening)
 ## -------------------------------------------------------------------------
 ## Purpose
 ##   Dimensionality reduction (pre-screening) for X and Y by iteratively
@@ -343,7 +469,7 @@ kld_cross00 = function(W,index){
 ##     the smaller average, and update the opposite side’s sums by subtracting
 ##     contributions of the removed block (recomputing only the needed pieces).
 ##   - Stops when remaining counts hit targets (≤ps1 and/or ≤qs1).
-subg22_s1 <- function(X, Y, rsum, csum, cut, ps1, qs1, k1, k2,verbose=FALSE) {
+gids_p1 <- function(X, Y, rsum, csum, cut, ps1, qs1, k1, k2,verbose=FALSE) {
   
   nr = length(rsum) ## number of rows
   nc = length(csum) ## number of columns
@@ -400,6 +526,8 @@ subg22_s1 <- function(X, Y, rsum, csum, cut, ps1, qs1, k1, k2,verbose=FALSE) {
       
     } else if ( dR <= dC && row > ps1) { ## case that rows are excluded
       if(length(c_which_0)>0){
+        if (row - length(IndR) < ps1) IndR = IndR[1:(row-ps1)]
+          
         cor_temp = abs(cor(X[,IndR],Y[,-c_which_0]))
         cor_temp[cor_temp<cut]=0
         C[-c_which_0] <- C[-c_which_0] - colSums(cor_temp)
@@ -413,6 +541,7 @@ subg22_s1 <- function(X, Y, rsum, csum, cut, ps1, qs1, k1, k2,verbose=FALSE) {
       R[IndR] <- 0
     } else { ## case that columns are excluded
       if(length(r_which_0)>0){
+        if (col - length(IndC) < qs1) IndC = IndC[1:(col-qs1)]
         cor_temp = abs(cor(X[,-r_which_0],Y[,IndC]))
         cor_temp[cor_temp<cut]=0
         R[-r_which_0] <- R[-r_which_0] - rowSums(cor_temp)
@@ -443,10 +572,10 @@ subg22_s1 <- function(X, Y, rsum, csum, cut, ps1, qs1, k1, k2,verbose=FALSE) {
 ##   W1     : numeric matrix (|X| x |Y|). Absolute correlation (or general weights).
 ##   lambda : numeric vector of lambda exponents for density scoring.
 ##   cut1   : numeric. First hard-threshold (epsilon1); entries < cut1 are zeroed before peeling.
-##   cut2   : numeric. Second threshold (epsilon2); forwarded to subg22_2 for refinement.
+##   cut2   : numeric. Second threshold (epsilon2); forwarded to gids_p22 for refinement.
 ##   index0 : list with entries $x, $y giving candidate row/col indices to consider.
 ##            If empty, use all rows/cols of W1.
-##   gamma0 : numeric (passed to subg22_2). Typically controls additional criteria (e.g., size/penalty).
+##   gamma0 : numeric (passed to gids_p22). Typically controls additional criteria (e.g., size/penalty).
 ##   verbose: logical. If TRUE, prints progress.
 ##
 ## Output
@@ -460,10 +589,10 @@ subg22_s1 <- function(X, Y, rsum, csum, cut, ps1, qs1, k1, k2,verbose=FALSE) {
 ##     dT = C_t / (#rows). It removes the side with the smaller average (sparser node).
 ##   - For each step, it records (#rows, #cols, which-side-removed, removed row/col id)
 ##     and the lambda-density score. The best step (per lambda) determines the first subgraph.
-##   - Then it repeatedly calls subg22_2 (a refinement/extraction step) to pull out
+##   - Then it repeatedly calls gids_p22 (a refinement/extraction step) to pull out
 ##     additional subgraphs from the remaining index set until convergence.
 ##
-subg22_1 <- function(W1, lambda, cut1, cut2, index0 = list(), gamma0, verbose = FALSE) {
+gids_p2 <- function(W1, lambda, cut1, cut2, index0 = list(), gamma0, verbose = FALSE) {
   
   # If no candidate indices provided, default to full matrix
   if (length(index0) == 0) {
@@ -632,7 +761,7 @@ subg22_1 <- function(W1, lambda, cut1, cut2, index0 = list(), gamma0, verbose = 
   
   if (verbose) cat("first graph is extracted", "\n")
   
-  # 5) For each lambda, iteratively extract additional subgraphs via subg22_2
+  # 5) For each lambda, iteratively extract additional subgraphs via gids_p22
   is_done <- rep(FALSE, length(index))
   for (i in 1:length(index)) {
     
@@ -643,8 +772,8 @@ subg22_1 <- function(W1, lambda, cut1, cut2, index0 = list(), gamma0, verbose = 
     
     k <- 2
     while (!is_done[i]) {
-      # subg22_2 should return a (possibly refined) subgraph from current pool index[[i]]
-      result11 <- subg22_2(W1, index[[i]], lambda[i], cut1, cut2, gamma0)
+      # gids_p22 should return a (possibly refined) subgraph from current pool index[[i]]
+      result11 <- gids_p22(W1, index[[i]], lambda[i], cut1, cut2, gamma0)
       
       # If no change (same size), we are done for this lambda
       if (length(result11$x) == length(index[[i]]$x)) {
@@ -683,7 +812,7 @@ subg22_1 <- function(W1, lambda, cut1, cut2, index0 = list(), gamma0, verbose = 
 ##              $y : selected col indices (in W’s coordinate system)
 ##            Either the refined subgraph or a fallback to the input index0.
 ##
-subg22_2 <- function(W, index0, lambda0, cut1, cut2, gamma0) {
+gids_p22 <- function(W, index0, lambda0, cut1, cut2, gamma0) {
   
   # 1) Work on the candidate submatrix; hard-threshold at cut1 for peeling.
   W0 <- abs(W[index0$x, index0$y])
